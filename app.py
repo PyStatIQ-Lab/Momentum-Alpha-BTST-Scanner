@@ -80,20 +80,29 @@ def calculate_technical_indicators(df):
 def calculate_btst_score(row):
     score = 0
 
-    try:
-        price_change = float(row.get('price_change_pct', 0))
-        vol_change = float(row.get('volume_change_pct', 0))
-        rsi = float(row.get('rsi', 50))
-        macd_diff = float(row.get('macd_diff', 0))
-        ema_cross = int(row.get('ema_cross', 0))
-        bb_width = float(row.get('bb_width', 0))
-        close_pos = float(row.get('close_position', 0.5))
-        vwap_diff = float(row.get('vwap_diff', 0))
-        ema20 = float(row.get('ema20', 0))
-        ema50 = float(row.get('ema50', 1))
-    except Exception as e:
-        return 0  # fallback if any issue parsing row
+    # Ensure we work with scalar values and log any issues
+    def get_scalar(value, default=0):
+        try:
+            if isinstance(value, pd.Series):
+                return float(value.iloc[-1])
+            return float(value)
+        except:
+            return default
 
+    # Extract and convert to scalar
+    price_change = get_scalar(row.get('price_change_pct', 0))
+    vol_change = get_scalar(row.get('volume_change_pct', 0))
+    rsi = get_scalar(row.get('rsi', 50))
+    macd_diff = get_scalar(row.get('macd_diff', 0))
+    ema_cross = int(get_scalar(row.get('ema_cross', 0)))
+    bb_width = get_scalar(row.get('bb_width', 0))
+    close_pos = get_scalar(row.get('close_position', 0.5))
+    vwap_diff = get_scalar(row.get('vwap_diff', 0))
+    ema20 = get_scalar(row.get('ema20', 0))
+    ema50 = get_scalar(row.get('ema50', 1))
+
+    # ---- Scoring Logic ----
+    # Price Momentum (Max 30 points)
     if price_change > 3:
         score += 30
     elif price_change > 2:
@@ -101,6 +110,7 @@ def calculate_btst_score(row):
     elif price_change > 1:
         score += 10
 
+    # Volume Spike (Max 20 points)
     if vol_change > 150:
         score += 20
     elif vol_change > 100:
@@ -108,15 +118,20 @@ def calculate_btst_score(row):
     elif vol_change > 50:
         score += 10
 
+    # Technical Indicators (Max 30 points)
     if 55 < rsi < 70:
         score += 10
+
     if macd_diff > 0:
         score += 10
+
     if ema_cross == 1:
         score += 5
+
     if bb_width > 0.1:
         score += 5
 
+    # Closing Position (Max 20 points)
     if close_pos > 0.8:
         score += 20
     elif close_pos > 0.7:
@@ -124,15 +139,18 @@ def calculate_btst_score(row):
     elif close_pos > 0.6:
         score += 10
 
+    # VWAP Position (Max 10 points)
     if vwap_diff > 1:
         score += 10
     elif vwap_diff > 0.5:
         score += 5
 
+    # Trend Alignment (Max 10 points)
     if ema20 > ema50:
         score += 10
 
     return min(score, 100)
+
 
 # ========== Streamlit UI ==========
 
