@@ -8,23 +8,34 @@ import time
 import re
 
 # Feature Engineering Functions
-def calculate_technical_indicators(data):
+def calculate_technical_indicators(df):
     # Clone to avoid SettingWithCopyWarning
-    df = data.copy()
+    df = df.copy()
+    
+    # Ensure we have datetime index
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index)
+    
+    # Sort by date ascending for proper calculations
+    df = df.sort_index(ascending=True)
     
     # Price and Volume Features
     df['price_change_pct'] = df['Close'].pct_change() * 100
     
-    # Volume change calculation with minimum period check
+    # Volume change calculation
     vol_window = min(10, len(df) - 1)
-    if vol_window > 0:
+    if vol_window > 1:
         df['volume_change_pct'] = (df['Volume'] / df['Volume'].rolling(vol_window).mean() - 1) * 100
     else:
         df['volume_change_pct'] = 0
     
     # VWAP Calculation
     try:
-        df['vwap'] = (df['Volume'] * (df['High'] + df['Low'] + df['Close']) / 3).cumsum() / df['Volume'].cumsum()
+        # Calculate typical price
+        typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+        cumulative_tp = (typical_price * df['Volume']).cumsum()
+        cumulative_volume = df['Volume'].cumsum()
+        df['vwap'] = cumulative_tp / cumulative_volume
         df['vwap_diff'] = (df['Close'] - df['vwap']) / (df['vwap'] + 1e-8) * 100
     except:
         df['vwap'] = df['Close']
@@ -33,14 +44,14 @@ def calculate_technical_indicators(data):
     # Close position in today's range
     df['close_position'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-8)
     
-    # Technical Indicators with safe calculation
+    # Technical Indicators
     try:
-        df['rsi'] = ta.momentum.RSIIndicator(df['Close'], window=min(14, len(df)-1)).rsi()
+        df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=min(14, len(df)-1)).rsi()
     except:
         df['rsi'] = 50
     
     try:
-        macd = ta.trend.MACD(df['Close'])
+        macd = ta.trend.MACD(close=df['Close'])
         df['macd_diff'] = macd.macd_diff()
     except:
         df['macd_diff'] = 0
@@ -48,7 +59,7 @@ def calculate_technical_indicators(data):
     # Moving Averages
     for window in [20, 50]:
         if len(df) >= window:
-            df[f'ema{window}'] = ta.trend.EMAIndicator(df['Close'], window=window).ema_indicator()
+            df[f'ema{window}'] = ta.trend.EMAIndicator(close=df['Close'], window=window).ema_indicator()
         else:
             df[f'ema{window}'] = df['Close']
     
@@ -60,7 +71,7 @@ def calculate_technical_indicators(data):
     
     # Bollinger Bands
     if len(df) > 20:
-        bb = ta.volatility.BollingerBands(df['Close'])
+        bb = ta.volatility.BollingerBands(close=df['Close'])
         df['bb_width'] = bb.bollinger_wband()
     else:
         df['bb_width'] = 0
@@ -157,13 +168,17 @@ if st.button("🔍 Scan BTST Opportunities"):
             status_text = st.empty()
             
             # Market strength check
-            benchmark = '^NSEI' if market_choice == 'NSE' else '^BSESN'
+            benchmark = '^NSEI'
+            market_strength = "Unknown"
             try:
-                nifty = yf.download(benchmark, period='2d', progress=False)['Close']
-                market_strength = "Bullish" if len(nifty) >= 2 and nifty[-1] > nifty[-2] else "Bearish"
-            except:
-                market_strength = "Unknown"
-                st.warning("Couldn't fetch market index data")
+                nifty_data = yf.download(benchmark, period='2d', progress=False)
+                if not nifty_data.empty and len(nifty_data) >= 2:
+                    nifty = nifty_data['Close']
+                    market_strength = "Bullish" if nifty.iloc[-1] > nifty.iloc[-2] else "Bearish"
+                else:
+                    st.warning("Insufficient market index data")
+            except Exception as e:
+                st.warning(f"Couldn't fetch market index data: {str(e)}")
             
             total_symbols = len(symbols)
             suffix = '.NS' if market_choice == 'NSE' else '.BO'
@@ -178,21 +193,27 @@ if st.button("🔍 Scan BTST Opportunities"):
                     data = None
                     for attempt in range(3):
                         try:
-                            data = yf.download(yf_symbol, period='100d', progress=False)
-                            if len(data) > 10:  # Valid data check
+                            data = yf.download(yf_symbol, period='100d', progress=False, auto_adjust=True)
+                            if not data.empty and len(data) > 20:  # Valid data check
                                 break
                         except Exception as e:
                             if attempt == 2:
                                 st.warning(f"Failed to download {yf_symbol}: {str(e)}")
                             time.sleep(0.5)  # Brief pause before retry
                     
-                    if data is None or len(data) < 20:
+                    if data is None or data.empty or len(data) < 20:
                         status_text.text(f"Skipped {symbol}: insufficient data")
                         continue
                     
+                    # Ensure we have the correct columns
+                    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    for col in required_cols:
+                        if col not in data.columns:
+                            data[col] = data['Close']  # Fallback to Close for missing columns
+                    
                     # Calculate indicators
                     data = calculate_technical_indicators(data)
-                    if len(data) == 0:
+                    if data.empty:
                         continue
                     
                     latest = data.iloc[-1]
