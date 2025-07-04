@@ -20,13 +20,22 @@ def calculate_technical_indicators(df):
     df = df.sort_index(ascending=True)
     
     # Price and Volume Features
-    df['price_change_pct'] = df['Close'].pct_change() * 100
+    try:
+        # Calculate price change with NaN handling
+        df['price_change_pct'] = df['Close'].pct_change().fillna(0) * 100
+    except:
+        df['price_change_pct'] = 0
     
     # Volume change calculation
-    vol_window = min(10, len(df) - 1)
-    if vol_window > 1:
-        df['volume_change_pct'] = (df['Volume'] / df['Volume'].rolling(vol_window).mean() - 1) * 100
-    else:
+    try:
+        vol_window = min(10, len(df) - 1)
+        if vol_window > 1:
+            # Calculate rolling mean with min_periods=1
+            vol_avg = df['Volume'].rolling(vol_window, min_periods=1).mean()
+            df['volume_change_pct'] = ((df['Volume'] / vol_avg) - 1).fillna(0) * 100
+        else:
+            df['volume_change_pct'] = 0
+    except:
         df['volume_change_pct'] = 0
     
     # VWAP Calculation
@@ -36,29 +45,32 @@ def calculate_technical_indicators(df):
         cumulative_tp = (typical_price * df['Volume']).cumsum()
         cumulative_volume = df['Volume'].cumsum()
         df['vwap'] = cumulative_tp / cumulative_volume
-        df['vwap_diff'] = (df['Close'] - df['vwap']) / (df['vwap'] + 1e-8) * 100
+        df['vwap_diff'] = ((df['Close'] - df['vwap']) / (df['vwap'] + 1e-8)).fillna(0) * 100
     except:
         df['vwap'] = df['Close']
         df['vwap_diff'] = 0
     
     # Close position in today's range
-    df['close_position'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 1e-8)
+    try:
+        range_val = df['High'] - df['Low'] + 1e-8
+        df['close_position'] = (df['Close'] - df['Low']) / range_val
+        df['close_position'] = df['close_position'].fillna(0.5)
+    except:
+        df['close_position'] = 0.5
     
     # Technical Indicators
     try:
-        # Ensure we're using Series, not DataFrame
+        # Ensure we're using Series
         close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
-        df['rsi'] = ta.momentum.RSIIndicator(close=close_series, window=min(14, len(df)-1)).rsi()
-    except Exception as e:
-        st.warning(f"RSI calculation error: {str(e)}")
+        df['rsi'] = ta.momentum.RSIIndicator(close=close_series, window=min(14, len(df)-1)).rsi().fillna(50)
+    except:
         df['rsi'] = 50
     
     try:
         close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
         macd = ta.trend.MACD(close=close_series)
-        df['macd_diff'] = macd.macd_diff()
-    except Exception as e:
-        st.warning(f"MACD calculation error: {str(e)}")
+        df['macd_diff'] = macd.macd_diff().fillna(0)
+    except:
         df['macd_diff'] = 0
     
     # Moving Averages
@@ -66,7 +78,7 @@ def calculate_technical_indicators(df):
         try:
             close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
             if len(df) >= window:
-                df[f'ema{window}'] = ta.trend.EMAIndicator(close=close_series, window=window).ema_indicator()
+                df[f'ema{window}'] = ta.trend.EMAIndicator(close=close_series, window=window).ema_indicator().fillna(df['Close'])
             else:
                 df[f'ema{window}'] = df['Close']
         except:
@@ -83,13 +95,13 @@ def calculate_technical_indicators(df):
         close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
         if len(df) > 20:
             bb = ta.volatility.BollingerBands(close=close_series)
-            df['bb_width'] = bb.bollinger_wband()
+            df['bb_width'] = bb.bollinger_wband().fillna(0)
         else:
             df['bb_width'] = 0
     except:
         df['bb_width'] = 0
     
-    return df.dropna(subset=['price_change_pct'], how='all')
+    return df
 
 def calculate_btst_score(row):
     """Rule-based scoring system for BTST potential"""
@@ -180,7 +192,7 @@ if st.button("🔍 Scan BTST Opportunities"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Market strength check - using ^NSEI as requested
+            # Market strength check - using ^NSEI
             benchmark = '^NSEI'
             market_strength = "Unknown"
             try:
@@ -217,13 +229,18 @@ if st.button("🔍 Scan BTST Opportunities"):
                     required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                     for col in required_cols:
                         if col not in data.columns:
-                            data[col] = data['Close']  # Fallback to Close for missing columns
+                            # If Close is available, use it for missing columns
+                            if 'Close' in data.columns:
+                                data[col] = data['Close']
+                            else:
+                                # Skip if essential columns are missing
+                                status_text.text(f"Skipped {symbol}: missing columns")
+                                continue
                     
                     # Calculate indicators
                     data = calculate_technical_indicators(data)
-                    if data.empty:
-                        continue
                     
+                    # Get the latest data point
                     latest = data.iloc[-1]
                     
                     # Calculate score
@@ -298,7 +315,7 @@ if st.button("🔍 Scan BTST Opportunities"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if not results_df.empty and not top_picks.empty:
+                    if not results_df.empty and 'top_picks' in locals() and not top_picks.empty:
                         st.bar_chart(top_picks.set_index('Symbol')['Score'].head(10))
                     else:
                         st.info("No strong candidates to visualize")
