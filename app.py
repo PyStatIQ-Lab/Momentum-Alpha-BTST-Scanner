@@ -20,27 +20,18 @@ def calculate_technical_indicators(df):
     df = df.sort_index(ascending=True)
     
     # Price and Volume Features
-    try:
-        # Calculate price change with NaN handling
-        df['price_change_pct'] = df['Close'].pct_change().fillna(0) * 100
-    except:
-        df['price_change_pct'] = 0
+    df['price_change_pct'] = df['Close'].pct_change().fillna(0) * 100
     
     # Volume change calculation
-    try:
-        vol_window = min(10, len(df) - 1)
-        if vol_window > 1:
-            # Calculate rolling mean with min_periods=1
-            vol_avg = df['Volume'].rolling(vol_window, min_periods=1).mean()
-            df['volume_change_pct'] = ((df['Volume'] / vol_avg) - 1).fillna(0) * 100
-        else:
-            df['volume_change_pct'] = 0
-    except:
+    vol_window = min(10, len(df) - 1)
+    if vol_window > 1:
+        vol_avg = df['Volume'].rolling(vol_window, min_periods=1).mean()
+        df['volume_change_pct'] = ((df['Volume'] / vol_avg) - 1).fillna(0) * 100
+    else:
         df['volume_change_pct'] = 0
     
     # VWAP Calculation
     try:
-        # Calculate typical price
         typical_price = (df['High'] + df['Low'] + df['Close']) / 3
         cumulative_tp = (typical_price * df['Volume']).cumsum()
         cumulative_volume = df['Volume'].cumsum()
@@ -60,15 +51,12 @@ def calculate_technical_indicators(df):
     
     # Technical Indicators
     try:
-        # Ensure we're using Series
-        close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
-        df['rsi'] = ta.momentum.RSIIndicator(close=close_series, window=min(14, len(df)-1)).rsi().fillna(50)
+        df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=min(14, len(df)-1)).rsi().fillna(50)
     except:
         df['rsi'] = 50
     
     try:
-        close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
-        macd = ta.trend.MACD(close=close_series)
+        macd = ta.trend.MACD(close=df['Close'])
         df['macd_diff'] = macd.macd_diff().fillna(0)
     except:
         df['macd_diff'] = 0
@@ -76,9 +64,8 @@ def calculate_technical_indicators(df):
     # Moving Averages
     for window in [20, 50]:
         try:
-            close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
             if len(df) >= window:
-                df[f'ema{window}'] = ta.trend.EMAIndicator(close=close_series, window=window).ema_indicator().fillna(df['Close'])
+                df[f'ema{window}'] = ta.trend.EMAIndicator(close=df['Close'], window=window).ema_indicator().fillna(df['Close'])
             else:
                 df[f'ema{window}'] = df['Close']
         except:
@@ -92,9 +79,8 @@ def calculate_technical_indicators(df):
     
     # Bollinger Bands
     try:
-        close_series = df['Close'] if isinstance(df['Close'], pd.Series) else df['Close'].squeeze()
         if len(df) > 20:
-            bb = ta.volatility.BollingerBands(close=close_series)
+            bb = ta.volatility.BollingerBands(close=df['Close'])
             df['bb_width'] = bb.bollinger_wband().fillna(0)
         else:
             df['bb_width'] = 0
@@ -105,10 +91,25 @@ def calculate_technical_indicators(df):
 
 def calculate_btst_score(row):
     """Rule-based scoring system for BTST potential"""
+    # Convert row to dictionary if it's a Series
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    
     score = 0
     
-    # Price Momentum (Max 30 points)
+    # Extract values safely
     price_change = row.get('price_change_pct', 0)
+    vol_change = row.get('volume_change_pct', 0)
+    rsi = row.get('rsi', 50)
+    macd_diff = row.get('macd_diff', 0)
+    ema_cross = row.get('ema_cross', 0)
+    bb_width = row.get('bb_width', 0)
+    close_pos = row.get('close_position', 0.5)
+    vwap_diff = row.get('vwap_diff', 0)
+    ema20 = row.get('ema20', 0)
+    ema50 = row.get('ema50', 1)  # Default to 1 to avoid division by zero
+    
+    # Price Momentum (Max 30 points)
     if price_change > 3:
         score += 30
     elif price_change > 2:
@@ -117,7 +118,6 @@ def calculate_btst_score(row):
         score += 10
     
     # Volume Spike (Max 20 points)
-    vol_change = row.get('volume_change_pct', 0)
     if vol_change > 150:
         score += 20
     elif vol_change > 100:
@@ -126,21 +126,19 @@ def calculate_btst_score(row):
         score += 10
     
     # Technical Indicators (Max 30 points)
-    rsi = row.get('rsi', 50)
     if 55 < rsi < 70:
         score += 10
     
-    if row.get('macd_diff', 0) > 0:
+    if macd_diff > 0:
         score += 10
     
-    if row.get('ema_cross', 0) == 1:
+    if ema_cross == 1:
         score += 5
     
-    if row.get('bb_width', 0) > 0.1:
+    if bb_width > 0.1:
         score += 5
     
     # Closing Position (Max 20 points)
-    close_pos = row.get('close_position', 0.5)
     if close_pos > 0.8:
         score += 20
     elif close_pos > 0.7:
@@ -149,16 +147,14 @@ def calculate_btst_score(row):
         score += 10
     
     # VWAP Position (Max 10 points)
-    vwap_diff = row.get('vwap_diff', 0)
     if vwap_diff > 1:
         score += 10
     elif vwap_diff > 0.5:
         score += 5
     
     # Trend Alignment (Max 10 points)
-    if 'ema20' in row and 'ema50' in row:
-        if row['ema20'] > row['ema50']:
-            score += 10
+    if ema20 > ema50:
+        score += 10
     
     return min(score, 100)  # Cap score at 100
 
@@ -229,11 +225,9 @@ if st.button("🔍 Scan BTST Opportunities"):
                     required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                     for col in required_cols:
                         if col not in data.columns:
-                            # If Close is available, use it for missing columns
                             if 'Close' in data.columns:
                                 data[col] = data['Close']
                             else:
-                                # Skip if essential columns are missing
                                 status_text.text(f"Skipped {symbol}: missing columns")
                                 continue
                     
