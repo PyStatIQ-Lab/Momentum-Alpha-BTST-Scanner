@@ -5,6 +5,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import ta
 import time
+import re
 
 # Feature Engineering Functions
 def calculate_technical_indicators(data):
@@ -149,11 +150,8 @@ if st.button("🔍 Scan BTST Opportunities"):
                 st.error("Selected sheet must contain 'Symbol' column")
                 st.stop()
             
-            # Add exchange suffix to symbols
-            suffix = '.NS' if market_choice == 'NSE' else '.BO'
-            symbols_df['yf_symbol'] = symbols_df['Symbol'].astype(str) + suffix
-            
-            symbols = symbols_df['yf_symbol'].tolist()
+            # Clean and format symbols
+            symbols = symbols_df['Symbol'].astype(str).str.strip().str.upper().tolist()
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -161,23 +159,31 @@ if st.button("🔍 Scan BTST Opportunities"):
             # Market strength check
             benchmark = '^NSEI' if market_choice == 'NSE' else '^BSESN'
             try:
-                nifty = yf.download(benchmark, period='2d')['Close']
+                nifty = yf.download(benchmark, period='2d', progress=False)['Close']
                 market_strength = "Bullish" if len(nifty) >= 2 and nifty[-1] > nifty[-2] else "Bearish"
             except:
                 market_strength = "Unknown"
                 st.warning("Couldn't fetch market index data")
             
             total_symbols = len(symbols)
+            suffix = '.NS' if market_choice == 'NSE' else '.BO'
+            
             for i, symbol in enumerate(symbols):
                 try:
+                    # Remove any existing suffix
+                    clean_symbol = re.sub(r'\.(NS|BO|NSE|BSE)$', '', symbol, flags=re.IGNORECASE)
+                    yf_symbol = clean_symbol + suffix
+                    
                     # Download data with retry logic
                     data = None
                     for attempt in range(3):
                         try:
-                            data = yf.download(symbol, period='100d', progress=False)
+                            data = yf.download(yf_symbol, period='100d', progress=False)
                             if len(data) > 10:  # Valid data check
                                 break
-                        except:
+                        except Exception as e:
+                            if attempt == 2:
+                                st.warning(f"Failed to download {yf_symbol}: {str(e)}")
                             time.sleep(0.5)  # Brief pause before retry
                     
                     if data is None or len(data) < 20:
@@ -202,7 +208,7 @@ if st.button("🔍 Scan BTST Opportunities"):
                         day_change = 0
                     
                     results.append({
-                        'Symbol': symbol.replace(suffix, ''),
+                        'Symbol': clean_symbol,
                         'Score': score,
                         'Price': latest['Close'],
                         'Change (%)': day_change,
@@ -219,7 +225,7 @@ if st.button("🔍 Scan BTST Opportunities"):
                 # Update progress
                 progress = (i + 1) / total_symbols
                 progress_bar.progress(progress)
-                status_text.text(f"Processed {i+1}/{total_symbols}: {symbol} | Market: {market_strength}")
+                status_text.text(f"Processed {i+1}/{total_symbols}: {clean_symbol} | Market: {market_strength}")
             
             # Create results dataframe
             if results:
@@ -239,27 +245,34 @@ if st.button("🔍 Scan BTST Opportunities"):
                 
                 # Top recommendations
                 st.subheader("🔥 Top BTST Opportunities")
-                top_picks = results_df[results_df['Recommendation'].isin(['Strong Buy', 'Watch'])]
-                st.dataframe(top_picks.head(10).style.background_gradient(subset=['Score'], cmap='RdYlGn'))
+                if not results_df.empty:
+                    top_picks = results_df[results_df['Recommendation'].isin(['Strong Buy', 'Watch'])]
+                    if not top_picks.empty:
+                        st.dataframe(top_picks.head(10).style.background_gradient(subset=['Score'], cmap='RdYlGn'))
+                    else:
+                        st.info("No strong BTST candidates found today")
+                else:
+                    st.warning("No valid stocks found with sufficient data")
                 
                 # Download option
-                csv = results_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Full Results",
-                    data=csv,
-                    file_name=f'btst_scan_{datetime.now().strftime("%Y%m%d")}.csv',
-                    mime='text/csv'
-                )
+                if not results_df.empty:
+                    csv = results_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Full Results",
+                        data=csv,
+                        file_name=f'btst_scan_{datetime.now().strftime("%Y%m%d")}.csv',
+                        mime='text/csv'
+                    )
                 
                 # Visualizations
                 st.subheader("📊 Analysis Dashboard")
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if not top_picks.empty:
+                    if not results_df.empty and not top_picks.empty:
                         st.bar_chart(top_picks.set_index('Symbol')['Score'].head(10))
                     else:
-                        st.info("No strong candidates found")
+                        st.info("No strong candidates to visualize")
                 
                 with col2:
                     st.write("Recommendation Distribution")
@@ -281,4 +294,3 @@ if st.button("🔍 Scan BTST Opportunities"):
                 
         except Exception as e:
             st.error(f"Unexpected error: {str(e)}")
-            st.exception(e)
