@@ -240,7 +240,7 @@ if st.button("🔍 Scan BTST Opportunities"):
                 # Top recommendations
                 st.subheader("🔥 Top BTST Opportunities")
                 top_picks = results_df[results_df['Recommendation'].isin(['Strong Buy', 'Watch'])]
-                st.dataframe(top_picks.head(10).style.background_gradient(subset=['Score'], cmap='RdYlGn')
+                st.dataframe(top_picks.head(10).style.background_gradient(subset=['Score'], cmap='RdYlGn'))
                 
                 # Download option
                 csv = results_df.to_csv(index=False)
