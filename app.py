@@ -35,9 +35,12 @@ def fetch_yfinance_data(symbols):
 
 data_all = fetch_yfinance_data(stock_symbols + ["^NSEI"])
 
-nsei_data = data_all.pop("^NSEI")
-if nsei_data.empty:
+nsei_data = data_all.pop("^NSEI", None)
+
+if nsei_data is None or nsei_data.empty:
     st.warning("Could not fetch NSE Index (^NSEI) data.")
+else:
+    st.success("Fetched NSE Index (^NSEI) data.")
 
 # --- Step 3: Fetch News Data
 @st.cache_data(ttl=3600)
