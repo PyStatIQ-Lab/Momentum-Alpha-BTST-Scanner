@@ -60,59 +60,66 @@ def calculate_technical_indicators(df):
     return df
 
 # ========== Scoring Function ========== #
+# ========== Scoring Function ========== #
 def calculate_btst_score(row):
     score = 0
 
-    def get_scalar(value, default=0):
-        try:
-            if isinstance(value, pd.Series):
-                return float(value.iloc[-1])
-            return float(value)
-        except:
-            return default
+    # Helper function to safely extract scalar values
+    def get_scalar(value):
+        if isinstance(value, pd.Series):
+            return value.iloc[0]  # Extract first element from Series
+        return value  # Return directly if not a Series
 
-    price_change = get_scalar(row.get('price_change_pct', 0))
-    vol_change = get_scalar(row.get('volume_change_pct', 0))
-    rsi = get_scalar(row.get('rsi', 50))
-    macd_diff = get_scalar(row.get('macd_diff', 0))
-    bb_width = get_scalar(row.get('bb_width', 0))
-    close_pos = get_scalar(row.get('close_position', 0.5))
-    vwap_diff = get_scalar(row.get('vwap_diff', 0))
+    try:
+        # Extract values safely
+        price_change = get_scalar(row['price_change_pct']) if 'price_change_pct' in row else 0
+        vol_change = get_scalar(row['volume_change_pct']) if 'volume_change_pct' in row else 0
+        rsi = get_scalar(row['rsi']) if 'rsi' in row else 50
+        macd_diff = get_scalar(row['macd_diff']) if 'macd_diff' in row else 0
+        bb_width = get_scalar(row['bb_width']) if 'bb_width' in row else 0
+        close_pos = get_scalar(row['close_position']) if 'close_position' in row else 0.5
+        vwap_diff = get_scalar(row['vwap_diff']) if 'vwap_diff' in row else 0
 
-    if price_change > 3:
-        score += 30
-    elif price_change > 2:
-        score += 20
-    elif price_change > 1:
-        score += 10
+        # Scoring logic remains the same
+        if price_change > 3:
+            score += 30
+        elif price_change > 2:
+            score += 20
+        elif price_change > 1:
+            score += 10
 
-    if vol_change > 150:
-        score += 20
-    elif vol_change > 100:
-        score += 15
-    elif vol_change > 50:
-        score += 10
+        if vol_change > 150:
+            score += 20
+        elif vol_change > 100:
+            score += 15
+        elif vol_change > 50:
+            score += 10
 
-    if 55 < rsi < 70:
-        score += 10
+        if 55 < rsi < 70:
+            score += 10
 
-    if macd_diff > 0:
-        score += 10
+        if macd_diff > 0:
+            score += 10
 
-    if bb_width > 0.1:
-        score += 5
+        if bb_width > 0.1:
+            score += 5
 
-    if close_pos > 0.8:
-        score += 20
-    elif close_pos > 0.7:
-        score += 15
-    elif close_pos > 0.6:
-        score += 10
+        if close_pos > 0.8:
+            score += 20
+        elif close_pos > 0.7:
+            score += 15
+        elif close_pos > 0.6:
+            score += 10
 
-    if vwap_diff > 1:
-        score += 10
-    elif vwap_diff > 0.5:
-        score += 5
+        if vwap_diff > 1:
+            score += 10
+        elif vwap_diff > 0.5:
+            score += 5
+
+    except KeyError as e:
+        st.warning(f"Missing indicator in scoring: {e}")
+    except Exception as e:
+        st.warning(f"Error in scoring: {e}")
 
     return min(score, 100)
 
